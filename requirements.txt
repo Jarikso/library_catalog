@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-dotenv
+sqlalchemy
+asyncpg
+alembic
+pydantic
+pydantic-settings
+aiohttp
+certifi
