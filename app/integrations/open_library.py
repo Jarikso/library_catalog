@@ -1,21 +1,15 @@
-import logging
-
+import os
 from typing import Optional, Dict, Any
-from pydantic import BaseModel
+
+from dotenv import load_dotenv
+
 from app.interface.base_api_client import BaseApiClient
+from app.tools.logger import setup_logger
+from app.schemas.open import OpenLibraryBookInfo
 
-# Настройка логирования
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-logger.addHandler(handler)
+load_dotenv()
 
-class OpenLibraryBookInfo(BaseModel):
-    cover_url: Optional[str] = None
-    description: Optional[str] = None
-    rating: Optional[float] = None
-    first_publish_year: Optional[int] = None
+logger = setup_logger(__name__)
 
 
 class OpenLibraryClient(BaseApiClient):
@@ -23,9 +17,9 @@ class OpenLibraryClient(BaseApiClient):
 
     def __init__(self) -> None:
         """Инициализация клиента Open Library."""
-        super().__init__(base_url="https://openlibrary.org")
-        self.cover_url: str = "https://covers.openlibrary.org/b"
-        logger.info("OpenLibraryClient initialized")
+        super().__init__(base_url=os.getenv("OPEN_LIB_BASE"))
+        self.cover_url: str = os.getenv("OPEN_LIB_COVER_URL")
+        logger.info("Инициализация OpenLibraryClient")
 
     async def search(self, title: str, author: Optional[str] = None) -> Optional[OpenLibraryBookInfo]:
         """
@@ -69,20 +63,20 @@ class OpenLibraryClient(BaseApiClient):
                 logger.debug(f"Найден URL обложки: {result.cover_url}")
 
             # Получаем дополнительные детали если доступен work ID
-            if 'key' in book_data:
-                work_id = book_data['key'].split('/')[-1]
-                details = await self.get_details(work_id)
-                if details:
-                    if 'description' in details:
-                        if isinstance(details['description'], str):
-                            result.description = details['description']
-                        elif 'value' in details['description']:
-                            result.description = details['description']['value']
-                        logger.debug("Ошисание найдено")
+            match book_data:
+                case {'first_publish_year': year}:
+                    result.first_publish_year = year
+                    logger.debug(f"Найден год публикации: {year}")
 
-                    if 'rating' in details:
-                        result.rating = details.get('rating', {}).get('average', None)
-                        logger.debug(f"Найден рейтинг: {result.rating}")
+                case {'cover_i': cover_id}:
+                    result.cover_url = f"{self.cover_url}/id/{cover_id}-M.jpg"
+                    logger.debug(f"Найден URL обложки: {result.cover_url}")
+
+                case {'key': key}:
+                    work_id = key.split('/')[-1]
+                    details = await self.get_details(work_id)
+                    if details:
+                        self._process_details(details, result)
 
             logger.info(f"Успешно найдена инфлрмация о книги: {title}")
             return result
@@ -105,7 +99,7 @@ class OpenLibraryClient(BaseApiClient):
             ValueError: Если произошла ошибка при запросе
         """
         try:
-            logger.debug(f"Получение данных для работы: {work_id}")
+            logger.info(f"Получение данных для работы: {work_id}")
             endpoint = f"/works/{work_id}.json"
             data = await self._make_request("GET", endpoint)
 
@@ -119,3 +113,23 @@ class OpenLibraryClient(BaseApiClient):
         except Exception as e:
             logger.error(f"Ошибка получения данных по работе {work_id}: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to get work details: {str(e)}") from e
+
+
+    @staticmethod
+    def _process_details(details: Dict[str, Any], result: OpenLibraryBookInfo) -> None:
+
+        match details:
+            case {'description': str(desc)}:
+                result.description = desc
+                logger.info("Описание найдено (str)")
+
+            case {'description': {'value': val}}:
+                result.description = val
+                logger.info("Описание найдено (dict)")
+
+            case {'rating': {'average': rating}} if rating is not None:
+                result.rating = rating
+                logger.info(f"Найден рейтинг: {rating}")
+
+            case _:
+                logger.info("Не найдено дополнительных деталей для обработки")
