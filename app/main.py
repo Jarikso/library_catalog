@@ -1,22 +1,18 @@
-import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from app.routes import books
-from app.database import engine, Base
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+from app.database import engine, Base
+from app.tools.logger import setup_logger
+from app.routes.books import db_router
+from app.routes.file_book import file_router
+from app.routes.jsonbin_book import jsonbin_router
+
+
+logger = setup_logger(__name__)
 
 app = FastAPI(title="Book Library API")
-
+router = APIRouter()
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
@@ -87,7 +83,7 @@ async def create_tables():
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("Таблицы базы данных созданы умпешно")
+        logger.info("Таблицы базы данных созданы уcпешно")
     except Exception as e:
         logger.error(f"Ошибка создания таблиц базы данных: {str(e)}")
         raise HTTPException(
@@ -107,4 +103,6 @@ async def startup_event():
         logger.critical(f"Ошибка запуска приложения: {str(e)}")
         raise
 
-app.include_router(books.router, prefix="/books", tags=["books"])
+app.include_router(db_router.router, prefix="/db", tags=["database_books"])
+app.include_router(file_router.router, prefix="/file", tags=["file_books"])
+appрр.include_router(jsonbin_router.router, prefix="/jsonbin", tags=["jsonbin_books"])

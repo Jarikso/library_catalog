@@ -4,14 +4,11 @@ from abc import ABC, abstractmethod
 from typing import Generic, TypeVar, Optional, List, Type, Any
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException
+
+from app.tools.logger import setup_logger
 
 # Настройка логирования
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-logger.addHandler(handler)
+logger = setup_logger(__name__)
 
 # Аннотации типов
 ModelType = TypeVar('ModelType')  # Тип SQLAlchemy модели

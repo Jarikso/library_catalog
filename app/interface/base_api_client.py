@@ -2,17 +2,11 @@ import aiohttp
 import ssl
 import certifi
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
-import logging
+from typing import Optional, Dict, Any, Self
 
-# Настройка логирования
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter(
-    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-))
-logger.addHandler(handler)
+from app.tools.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 class BaseApiClient(ABC):
     def __init__(self, base_url: str) -> None:
@@ -24,8 +18,20 @@ class BaseApiClient(ABC):
         """
         self.base_url = base_url
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger(__name__)
+        self._session: aiohttp.ClientSession | None = None
         logger.info(f"Инициализация API клиента для {base_url}")
+
+    async def __aenter__(self) -> Self:
+        """Создает сессию при входе в контекст"""
+        self._session = aiohttp.ClientSession()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Закрывает сессию при выходе из контекста"""
+        if self._session:
+            await self._session.close()
+            self._session = None
 
     async def _make_request(
         self,
@@ -37,30 +43,39 @@ class BaseApiClient(ABC):
     ) -> Optional[Dict]:
         """
         Базовый метод для выполнения HTTP-запросов
-        :param method: HTTP метод (GET, POST, PUT, DELETE)
-        :param endpoint: Конечная точка API
-        :param params: Параметры запроса
-        :param headers: Заголовки запроса
-        :param data: Тело запроса
-        :return: Ответ в виде словаря или None в случае ошибки
+
+        Args:
+            method: HTTP метод (GET, POST, PUT, DELETE)
+            endpoint: Конечная точка API
+            params: Параметры запроса
+            headers: Заголовки запроса
+            data: Тело запроса
+
+        Returns:
+            Ответ в виде словаря или None в случае ошибки
+
+        Raises:
+            RuntimeError: Если метод вызван вне контекстного менеджера
         """
+        if self._session is None:
+            raise RuntimeError("Сессия не инициализирована. Используйте контекстный менеджер (async with)")
+
         url = f"{self.base_url}{endpoint}"
         try:
             logger.debug(
                 f"Making {method} request to {url} "
                 f"with params: {params}, headers: {headers}"
             )
-            async with aiohttp.ClientSession() as session:
-                async with session.request(
-                    method,
-                    url,
-                    params=params,
-                    headers=headers,
-                    json=data,
-                    ssl=self.ssl_context
-                ) as response:
-                    response.raise_for_status()
-                    return await response.json()
+            async with self._session.request(
+                method,
+                url,
+                params=params,
+                headers=headers,
+                json=data,
+                ssl=self.ssl_context
+            ) as response:
+                response.raise_for_status()
+                return await response.json()
         except aiohttp.ClientError as e:
             self.logger.error(f"Ошибка при выполнении запроса {method} {url}: {str(e)}")
             return None
